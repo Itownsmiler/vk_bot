@@ -17,6 +17,8 @@ WORK_END = time(11, 42)
 
 bot = Bot(token=TOKEN)
 
+CURRENT_MONTH = datetime.now().strftime("%Y-%m")
+
 # =====================
 # DB
 # =====================
@@ -47,7 +49,17 @@ CREATE TABLE IF NOT EXISTS arrivals (
 db.commit()
 
 # =====================
-# LEVEL SYSTEM
+# MONTH SYSTEM
+# =====================
+
+def check_month():
+    global CURRENT_MONTH
+    now_month = datetime.now().strftime("%Y-%m")
+    if now_month != CURRENT_MONTH:
+        CURRENT_MONTH = now_month
+
+# =====================
+# XP SYSTEM
 # =====================
 
 def add_xp(user_id: int, amount: int):
@@ -63,21 +75,21 @@ def add_xp(user_id: int, amount: int):
     xp, level = row
     xp += amount
 
-    leveled_up = False
+    leveled = False
 
     if xp >= level * 100:
         xp = 0
         level += 1
-        leveled_up = True
+        leveled = True
 
     cursor.execute("""
     UPDATE users SET xp=?, level=? WHERE user_id=?
     """, (xp, level, user_id))
 
-    return leveled_up, level
+    return leveled, level
 
 # =====================
-# NOTIFY ADMIN
+# ADMIN NOTIFY
 # =====================
 
 async def notify_admin(text: str):
@@ -94,19 +106,13 @@ async def notify_admin(text: str):
 # KEYBOARDS
 # =====================
 
-def kb_main(admin=False):
+def kb_main():
     kb = Keyboard(one_time=False)
     kb.add(Text("🟢 Я на месте")).row()
     kb.add(Text("📊 Статистика"))
     kb.add(Text("🏆 Топ месяц")).row()
     kb.add(Text("📈 Уровень"))
-
-    if admin:
-        kb.row()
-        kb.add(Text("⚙ Админ"))
-
     return kb
-
 
 def kb_back():
     kb = Keyboard(one_time=False)
@@ -114,7 +120,7 @@ def kb_back():
     return kb
 
 # =====================
-# SAFE COMMAND
+# SAFE PAYLOAD
 # =====================
 
 def get_cmd(message: Message):
@@ -150,42 +156,33 @@ async def router(message: Message):
         elif "статистика" in text:
             cmd = "stats"
         elif "топ" in text:
-            cmd = "top"
-        elif "топ месяц" in text:
             cmd = "top_month"
         elif "уровень" in text:
             cmd = "level"
-        elif "админ" in text:
-            cmd = "admin"
-        elif "лучший" in text:
-            cmd = "best"
         elif "назад" in text:
             cmd = "back"
 
     if not cmd:
         return
 
-    match cmd:
-        case "arrive":
-            await arrive(message)
-        case "stats":
-            await stats(message)
-        case "top_month":
-            await top_month(message)
-        case "level":
-            await level(message)
-        case "admin":
-            await admin(message)
-        case "best":
-            await best_worker(message)
-        case "back":
-            await back(message)
+    if cmd == "arrive":
+        await arrive(message)
+    elif cmd == "stats":
+        await stats(message)
+    elif cmd == "top_month":
+        await top_month(message)
+    elif cmd == "level":
+        await level(message)
+    elif cmd == "back":
+        await back(message)
 
 # =====================
 # ARRIVE
 # =====================
 
 async def arrive(message: Message):
+
+    check_month()
 
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
@@ -214,14 +211,9 @@ async def arrive(message: Message):
 
     late = now.time() > WORK_END
 
-    leveled_up, level = add_xp(message.from_id, 10 if not late else 3)
+    leveled, level = add_xp(message.from_id, 10 if not late else 3)
 
-    if not late:
-
-        text = f"✅ Вовремя\n🕒 {t}"
-
-    else:
-
+    if late:
         cursor.execute("""
         UPDATE users SET fines = fines + 1 WHERE user_id=?
         """, (message.from_id,))
@@ -230,12 +222,13 @@ async def arrive(message: Message):
             f"⚠ ОПОЗДАНИЕ\n👤 {message.from_id}\n🕒 {t}\n📅 {today}"
         )
 
-        text = f"❌ Опоздание\n🕒 {t}"
-
-    if leveled_up:
-        text += f"\n🎉 LEVEL UP! → {level}"
-
     db.commit()
+
+    text = "❌ Опоздание" if late else "✅ Вовремя"
+
+    if leveled:
+        text += f"\n🎉 LEVEL UP → {level}"
+
     await message.answer(text)
 
 # =====================
@@ -244,10 +237,12 @@ async def arrive(message: Message):
 
 async def stats(message: Message):
 
+    month = datetime.now().strftime("%Y-%m")
+
     cursor.execute("""
     SELECT COUNT(*) FROM arrivals
-    WHERE user_id=?
-    """, (message.from_id,))
+    WHERE user_id=? AND arrival_month=?
+    """, (message.from_id, month))
 
     total = cursor.fetchone()[0]
 
@@ -256,21 +251,21 @@ async def stats(message: Message):
     WHERE user_id=?
     """, (message.from_id,))
 
-    r = cursor.fetchone()
-
-    fines, level, xp = r if r else (0, 1, 0)
+    r = cursor.fetchone() or (0, 1, 0)
 
     await message.answer(f"""
 📊 СТАТИСТИКА
 
-📅 Всего: {total}
-💸 Штрафы: {fines}
-📈 Уровень: {level}
-⭐ XP: {xp}
+📅 Месяц: {month}
+📅 Приходов: {total}
+
+💸 Штрафы: {r[0]}
+📈 Уровень: {r[1]}
+⭐ XP: {r[2]}
 """, keyboard=kb_back())
 
 # =====================
-# TOP MONTH
+# TOP MONTH (WITH NAMES)
 # =====================
 
 async def top_month(message: Message):
@@ -278,50 +273,27 @@ async def top_month(message: Message):
     month = datetime.now().strftime("%Y-%m")
 
     cursor.execute("""
-    SELECT user_id, COUNT(*) as cnt
-    FROM arrivals
-    WHERE arrival_month=?
-    GROUP BY user_id
+    SELECT u.name, COUNT(a.user_id) as cnt
+    FROM arrivals a
+    JOIN users u ON u.user_id = a.user_id
+    WHERE a.arrival_month = ?
+    GROUP BY a.user_id
     ORDER BY cnt DESC
-    LIMIT 10
     """, (month,))
 
     rows = cursor.fetchall()
 
-    text = f"🏆 ТОП МЕСЯЦ ({month})\n\n"
-
-    for i, r in enumerate(rows):
-        text += f"{i+1}. user{r[0]} — {r[1]} приходов\n"
-
-    await message.answer(text, keyboard=kb_back())
-
-# =====================
-# BEST WORKER
-# =====================
-
-async def best_worker(message: Message):
-
-    month = datetime.now().strftime("%Y-%m")
-
-    cursor.execute("""
-    SELECT user_id, COUNT(*) as cnt
-    FROM arrivals
-    WHERE arrival_month=?
-    GROUP BY user_id
-    ORDER BY cnt DESC
-    LIMIT 1
-    """, (month,))
-
-    row = cursor.fetchone()
-
-    if not row:
-        await message.answer("Нет данных")
+    if not rows:
+        await message.answer("📭 Нет данных за месяц")
         return
 
-    await message.answer(
-        f"🏆 ЛУЧШИЙ СОТРУДНИК\n👤 user{row[0]}\n📊 {row[1]} приходов",
-        keyboard=kb_back()
-    )
+    text = f"🏆 ТОП МЕСЯЦ ({month})\n\n"
+
+    for i, (name, cnt) in enumerate(rows):
+        medal = ["🥇", "🥈", "🥉"][i] if i < 3 else "👤"
+        text += f"{medal} {name} — {cnt} приходов\n"
+
+    await message.answer(text, keyboard=kb_back())
 
 # =====================
 # LEVEL
@@ -333,10 +305,7 @@ async def level(message: Message):
     SELECT level, xp FROM users WHERE user_id=?
     """, (message.from_id,))
 
-    r = cursor.fetchone()
-
-    if not r:
-        r = (1, 0)
+    r = cursor.fetchone() or (1, 0)
 
     await message.answer(f"""
 📈 УРОВЕНЬ
@@ -346,32 +315,11 @@ async def level(message: Message):
 """, keyboard=kb_back())
 
 # =====================
-# ADMIN
-# =====================
-
-async def admin(message: Message):
-
-    if message.from_id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM arrivals")
-    total = cursor.fetchone()[0]
-
-    await message.answer(f"""
-⚙ АДМИН
-
-📊 Всего приходов: {total}
-""", keyboard=kb_back())
-
-# =====================
 # BACK
 # =====================
 
 async def back(message: Message):
-    await message.answer(
-        "🏠 Меню",
-        keyboard=kb_main(message.from_id == ADMIN_ID)
-    )
+    await message.answer("🏠 Меню", keyboard=kb_main())
 
 # =====================
 # START
