@@ -1,4 +1,4 @@
-import random
+import json
 from datetime import datetime, time
 
 import psycopg2
@@ -50,7 +50,25 @@ CREATE TABLE IF NOT EXISTS arrivals (
 conn.commit()
 
 # =====================================
-# KEYBOARD (ВАЖНО: payload вместо текста)
+# SAFE PAYLOAD (ГЛАВНЫЙ ФИКС)
+# =====================================
+
+def safe_payload(message: Message):
+    p = message.payload
+
+    if isinstance(p, str):
+        try:
+            return json.loads(p)
+        except:
+            return {}
+
+    if isinstance(p, dict):
+        return p
+
+    return {}
+
+# =====================================
+# KEYBOARD
 # =====================================
 
 def keyboard():
@@ -80,7 +98,7 @@ async def get_name(user_id: int):
     return "Пользователь"
 
 # =====================================
-# XP
+# XP SYSTEM
 # =====================================
 
 def add_xp(user_id: int, amount: int):
@@ -101,9 +119,7 @@ def add_xp(user_id: int, amount: int):
         level_up = True
 
     cursor.execute("""
-        UPDATE users
-        SET xp=%s, level=%s
-        WHERE user_id=%s
+        UPDATE users SET xp=%s, level=%s WHERE user_id=%s
     """, (xp, level, user_id))
 
     conn.commit()
@@ -129,33 +145,31 @@ async def start(message: Message):
     conn.commit()
 
     await message.answer(
-        f"🔥 Привет, {name}\n\nСистема сотрудников активна",
+        f"🔥 Привет, {name}\nСистема сотрудников активна",
         keyboard=keyboard()
     )
 
 # =====================================
-# ROUTER (ГЛАВНЫЙ ФИКС КНОПОК)
+# ROUTER (ИСПРАВЛЕННЫЙ)
 # =====================================
 
 @bot.on.message()
 async def router(message: Message):
 
-    payload = message.payload
+    payload = safe_payload(message)
+    cmd = payload.get("cmd")
 
-    if payload:
-        cmd = payload.get("cmd")
+    if cmd == "arrive":
+        return await arrive(message)
 
-        if cmd == "arrive":
-            return await arrive(message)
+    if cmd == "stats":
+        return await stats(message)
 
-        if cmd == "stats":
-            return await stats(message)
+    if cmd == "top":
+        return await top_month(message)
 
-        if cmd == "top":
-            return await top_month(message)
-
-        if cmd == "level":
-            return await level(message)
+    if cmd == "level":
+        return await level(message)
 
 # =====================================
 # ARRIVE
@@ -175,7 +189,7 @@ async def arrive(message: Message):
     """, (message.from_id, today))
 
     if cursor.fetchone():
-        return await message.answer("⚠ Ты уже отмечался сегодня", keyboard=keyboard())
+        return await message.answer("⚠ Уже отмечался", keyboard=keyboard())
 
     name = await get_name(message.from_id)
 
@@ -202,8 +216,7 @@ async def arrive(message: Message):
 
     if late:
         cursor.execute("""
-            UPDATE users
-            SET late_count = late_count + 1
+            UPDATE users SET late_count = late_count + 1
             WHERE user_id=%s
         """, (message.from_id,))
 
@@ -217,21 +230,20 @@ async def arrive(message: Message):
 
         if late_count % 3 == 0:
             cursor.execute("""
-                UPDATE users
-                SET fines = fines + 1
+                UPDATE users SET fines = fines + 1
                 WHERE user_id=%s
             """, (message.from_id,))
-
             text += "\n💸 Штраф"
 
         try:
             await bot.api.messages.send(
                 user_id=ADMIN_ID,
                 random_id=0,
-                message=f"⚠ {name} опоздал"
+                message=f"⚠ Пользователь опоздал"
             )
         except:
             pass
+
     else:
         text = f"✅ ВОВРЕМЯ\n🕒 {current_time}\n⭐ +10 XP"
 
@@ -319,8 +331,8 @@ async def level(message: Message):
     await message.answer(f"""
 📈 УРОВЕНЬ
 
-🏅 {row[1]}
-⭐ {row[0]}/100 XP
+🏅 Level: {row[1]}
+⭐ XP: {row[0]}/100
 """, keyboard=keyboard())
 
 # =====================================
