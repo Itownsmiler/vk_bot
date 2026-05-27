@@ -22,7 +22,7 @@ bot = Bot(token=TOKEN)
 # DATABASE
 # =========================
 
-postgresql://postgres:tBqXRFHAxgeaPsIpshqiXoEhKNOcxBAz@zephyr.proxy.rlwy.net:39924/railway
+DATABASE_URL = "postgresql://postgres:tBqXRFHAxgeaPsIpshqiXoEhKNOcxBAz@zephyr.proxy.rlwy.net:39924/railway"
 
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
