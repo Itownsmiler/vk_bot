@@ -28,7 +28,7 @@ DATABASE_URL = "postgresql://postgres:tBqXRFHAxgeaPsIpshqiXoEhKNOcxBAz@zephyr.pr
 # BOT
 # =====================================
 
-bot = Bot(token=TOKEN)
+bot = Bot(TOKEN)
 
 # =====================================
 # DATABASE
