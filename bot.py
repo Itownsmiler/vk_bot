@@ -1,5 +1,6 @@
 import sqlite3
 import random
+import json
 from datetime import datetime, time
 
 from vkbottle.bot import Bot, Message
@@ -57,7 +58,7 @@ GOOD = ["🔥 Отлично!", "💪 Молодец!", "🚀 Красавчик
 LATE = ["😴 Опоздал", "⌛ Поздно", "⚠ Дисциплина"]
 
 # =====================
-# LEVEL
+# LEVEL SYSTEM
 # =====================
 
 def add_xp(user_id: int, amount: int):
@@ -78,7 +79,7 @@ def add_xp(user_id: int, amount: int):
     """, (xp, level, user_id))
 
 # =====================
-# KEYBOARD (VK SAFE)
+# KEYBOARDS
 # =====================
 
 def kb_main(admin=False):
@@ -104,7 +105,31 @@ def kb_back():
     return kb
 
 # =====================
-# SAFE ROUTER (FIXED)
+# SAFE PAYLOAD PARSER (100% FIX)
+# =====================
+
+def get_cmd(message: Message):
+    payload = message.payload
+
+    # None
+    if not payload:
+        payload = {}
+
+    # string JSON
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except:
+            payload = {}
+
+    # dict
+    if isinstance(payload, dict):
+        return payload.get("cmd")
+
+    return None
+
+# =====================
+# ROUTER (FIXED)
 # =====================
 
 @bot.on.message()
@@ -113,12 +138,10 @@ async def router(message: Message):
     print("TEXT:", message.text)
     print("PAYLOAD:", message.payload)
 
-    payload = message.payload or {}
-    cmd = payload.get("cmd")
-
+    cmd = get_cmd(message)
     text = (message.text or "").lower()
 
-    # 🔥 FALLBACK если VK не дал payload
+    # fallback text buttons
     if not cmd:
         if "я на месте" in text:
             cmd = "arrive"
@@ -300,7 +323,11 @@ async def admin(message: Message):
     cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
 
-    await message.answer(f"⚙ USERS: {users}", keyboard=kb_back())
+    await message.answer(f"""
+⚙ ADMIN PANEL
+
+👥 USERS: {users}
+""", keyboard=kb_back())
 
 # =====================
 # BACK
@@ -308,12 +335,12 @@ async def admin(message: Message):
 
 async def back(message: Message):
     await message.answer(
-        "🏠 MENU",
+        "🏠 MAIN MENU",
         keyboard=kb_main(message.from_id == ADMIN_ID)
     )
 
 # =====================
-# RUN
+# START
 # =====================
 
 print("BOT STARTED")
