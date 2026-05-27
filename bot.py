@@ -52,7 +52,7 @@ def kb_main(admin=False):
     kb = Keyboard(one_time=False)
     kb.add(Text("🟢 Я на месте")).row()
     kb.add(Text("📊 Статистика"))
-    kb.add(Text("🏆 Топ месяц")).row()
+    kb.add(Text("🏆 Топ месяца")).row()
 
     if admin:
         kb.add(Text("⚙ Админ"))
@@ -229,7 +229,7 @@ async def top_month(message: Message):
 
     rows = cursor.fetchall()
 
-    text = f"🏆 ТОП МЕСЯЦ ({month})\n\n"
+    text = f"🏆 ТОП МЕСЯЦА ({month})\n\n"
 
     for i, r in enumerate(rows):
         text += f"{i+1}. user{r[0]} — {r[1]} приходов\n"
