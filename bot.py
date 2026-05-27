@@ -1,12 +1,13 @@
 import sqlite3
 import random
 from datetime import datetime
+
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-# =====================================
+# =====================
 # НАСТРОЙКИ
-# =====================================
+# =====================
 
 TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w"
 ADMIN_ID = 47965177
@@ -17,17 +18,13 @@ WORK_MINUTE = 0
 BONUS_FOR_30 = 1000
 PENALTY_FOR_3_LATE = 1000
 
-# =====================================
-# БОТ
-# =====================================
-
 bot = Bot(token=TOKEN)
 
-# =====================================
+# =====================
 # БАЗА ДАННЫХ
-# =====================================
+# =====================
 
-db = sqlite3.connect("workers.db")
+db = sqlite3.connect("workers.db", check_same_thread=False)
 cursor = db.cursor()
 
 cursor.execute("""
@@ -54,89 +51,64 @@ CREATE TABLE IF NOT EXISTS arrivals (
 
 db.commit()
 
-# =====================================
+# =====================
 # ФРАЗЫ
-# =====================================
+# =====================
 
 GOOD_MESSAGES = [
     "🔥 Красавчик! Первый на месте!",
     "💪 Отличная дисциплина!",
     "🚀 Машина! Так держать!",
-    "😎 Босс уже доволен тобой!",
-    "🏆 Сегодня ты в топе!"
+    "😎 Босс доволен!",
+    "🏆 Топ работа!"
 ]
 
 LATE_MESSAGES = [
-    "😴 Проспал что ли?",
-    "⌛ Опоздание записано...",
-    "👀 Коллектив уже работает!",
-    "⚠ Надо приходить раньше!",
+    "😴 Проспал?",
+    "⌛ Опоздание...",
+    "⚠ Надо раньше приходить!",
     "📉 Минус к дисциплине"
 ]
 
-# =====================================
+# =====================
 # КЛАВИАТУРА
-# =====================================
+# =====================
 
 def get_keyboard(admin=False):
-    keyboard = Keyboard(one_time=False)
+    kb = Keyboard(one_time=False)
 
-    keyboard.add(
-        Text("🟢 Я на месте"),
-        color=KeyboardButtonColor.POSITIVE
-    ).row()
-
-    keyboard.add(
-        Text("💰 Баланс"),
-        color=KeyboardButtonColor.PRIMARY
-    )
-
-    keyboard.add(
-        Text("🏆 Топ"),
-        color=KeyboardButtonColor.SECONDARY
-    ).row()
-
-    keyboard.add(
-        Text("📊 Статистика"),
-        color=KeyboardButtonColor.PRIMARY
-    )
+    kb.add(Text("🟢 Я на месте"), color=KeyboardButtonColor.POSITIVE).row()
+    kb.add(Text("💰 Баланс"), color=KeyboardButtonColor.PRIMARY)
+    kb.add(Text("🏆 Топ"), color=KeyboardButtonColor.SECONDARY).row()
+    kb.add(Text("📊 Статистика"), color=KeyboardButtonColor.PRIMARY)
 
     if admin:
-        keyboard.row()
-        keyboard.add(
-            Text("⚙ Админ-панель"),
-            color=KeyboardButtonColor.NEGATIVE
-        )
+        kb.row()
+        kb.add(Text("⚙ Админ-панель"), color=KeyboardButtonColor.NEGATIVE)
 
-    return keyboard.get_json()
+    return kb.get_json()
 
-# =====================================
-# SAFE VK USER GET
-# =====================================
+# =====================
+# БЕЗОПАСНОЕ ПОЛУЧЕНИЕ ИМЕНИ
+# =====================
 
-async def get_user_name(user_id: int):
+async def get_name(user_id: int):
     try:
         users = await bot.api.users.get(user_ids=user_id)
         if users:
-           user_info = await bot.api.users.get(user_ids=message.from_id)
-
-if not user_info:
-    name = "Пользователь"
-else:
-    name = user_info[0].first_name
-    except Exception as e:
-        print("VK API error:", e)
-
+            return users[0].first_name
+    except:
+        pass
     return "Пользователь"
 
-# =====================================
-# СТАРТ
-# =====================================
+# =====================
+# START
+# =====================
 
-@bot.on.message(text=["Начать", "/start", "start"])
+@bot.on.message(text=["/start", "start", "Начать"])
 async def start(message: Message):
 
-    name = await get_user_name(message.from_id)
+    name = await get_name(message.from_id)
 
     cursor.execute("""
     INSERT OR IGNORE INTO users (user_id, name)
@@ -146,17 +118,13 @@ async def start(message: Message):
     db.commit()
 
     await message.answer(
-        f"""
-🔥 Привет, {name}!
-
-Добро пожаловать в систему учета сотрудников 👇
-""",
+        f"🔥 Привет, {name}!\nСистема учёта сотрудников активна.",
         keyboard=get_keyboard(message.from_id == ADMIN_ID)
     )
 
-# =====================================
-# ПРИБЫТИЕ
-# =====================================
+# =====================
+# ПРИХОД
+# =====================
 
 @bot.on.message(text="🟢 Я на месте")
 async def arrive(message: Message):
@@ -165,8 +133,9 @@ async def arrive(message: Message):
     today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M:%S")
 
+    # уже отмечался?
     cursor.execute("""
-    SELECT * FROM arrivals
+    SELECT 1 FROM arrivals
     WHERE user_id = ? AND arrival_date = ?
     """, (message.from_id, today))
 
@@ -174,19 +143,21 @@ async def arrive(message: Message):
         await message.answer("⚠ Ты уже отмечался сегодня.")
         return
 
-    name = await get_user_name(message.from_id)
+    name = await get_name(message.from_id)
 
     cursor.execute("""
     INSERT INTO arrivals (user_id, name, arrival_time, arrival_date)
     VALUES (?, ?, ?, ?)
     """, (message.from_id, name, current_time, today))
 
+    # позиция
     cursor.execute("""
     SELECT COUNT(*) FROM arrivals
     WHERE arrival_date = ?
     """, (today,))
 
-    position = cursor.fetchone()[0]
+    row = cursor.fetchone()
+    position = row[0] if row else 0
 
     work_time = now.replace(
         hour=WORK_HOUR,
@@ -235,8 +206,8 @@ async def arrive(message: Message):
 ✅ {random.choice(GOOD_MESSAGES)}
 
 🕒 Время: {current_time}
-🏆 Место сегодня: #{position}
-💰 Получено: +{reward}₽
+🏆 Место: #{position}
+💰 +{reward}₽
 {bonus_text}
 """
 
@@ -275,16 +246,16 @@ async def arrive(message: Message):
 ❌ {random.choice(LATE_MESSAGES)}
 
 🕒 Время: {current_time}
-🏆 Место сегодня: #{position}
+🏆 Место: #{position}
 {penalty_text}
 """
 
     db.commit()
     await message.answer(text)
 
-# =====================================
+# =====================
 # БАЛАНС
-# =====================================
+# =====================
 
 @bot.on.message(text="💰 Баланс")
 async def balance(message: Message):
@@ -296,17 +267,17 @@ async def balance(message: Message):
     user = cursor.fetchone()
 
     if not user:
-        await message.answer("Нет данных о тебе. Напиши /start")
+        await message.answer("Сначала /start")
         return
 
     await message.answer(f"""
 💰 Баланс: {user[0]}₽
-🔥 Серия вовремя: {user[1]}
+🔥 Серия: {user[1]}
 """)
 
-# =====================================
+# =====================
 # СТАТИСТИКА
-# =====================================
+# =====================
 
 @bot.on.message(text="📊 Статистика")
 async def stats(message: Message):
@@ -319,20 +290,20 @@ async def stats(message: Message):
     user = cursor.fetchone()
 
     if not user:
-        await message.answer("Нет данных о тебе. Напиши /start")
+        await message.answer("Сначала /start")
         return
 
     await message.answer(f"""
-📊 Твоя статистика
+📊 Статистика
 
 ✅ Вовремя: {user[1]}
 ❌ Опозданий: {user[2]}
-📅 Всего приходов: {user[0]}
+📅 Всего: {user[0]}
 """)
 
-# =====================================
+# =====================
 # ТОП
-# =====================================
+# =====================
 
 @bot.on.message(text="🏆 Топ")
 async def top(message: Message):
@@ -346,21 +317,21 @@ async def top(message: Message):
 
     users = cursor.fetchall()
 
-    text = "🏆 ТОП СОТРУДНИКОВ\n\n"
+    text = "🏆 ТОП\n\n"
     medals = ["🥇", "🥈", "🥉"]
 
-    for i, user in enumerate(users):
+    for i, u in enumerate(users):
         medal = medals[i] if i < 3 else "👤"
-        text += f"{medal} {user[0]} — {user[1]} вовремя\n"
+        text += f"{medal} {u[0]} — {u[1]}\n"
 
     await message.answer(text)
 
-# =====================================
-# АДМИНКА
-# =====================================
+# =====================
+# АДМИН
+# =====================
 
 @bot.on.message(text="⚙ Админ-панель")
-async def admin_panel(message: Message):
+async def admin(message: Message):
 
     if message.from_id != ADMIN_ID:
         return
@@ -376,15 +347,15 @@ async def admin_panel(message: Message):
     today = cursor.fetchone()[0]
 
     await message.answer(f"""
-⚙ АДМИН ПАНЕЛЬ
+⚙ АДМИН
 
-👥 Сотрудников: {users}
-🟢 Сегодня отметились: {today}
+👥 Пользователей: {users}
+🟢 Сегодня: {today}
 """)
 
-# =====================================
-# ЗАПУСК
-# =====================================
+# =====================
+# RUN
+# =====================
 
 print("Бот запущен")
 bot.run_forever()
