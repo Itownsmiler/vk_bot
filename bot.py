@@ -5,22 +5,25 @@ import psycopg2
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, Text
 
-# =====================
-# CONFIG
-# =====================
+# =========================
+# НАСТРОЙКИ
+# =========================
 
-TOKEN = os.getenv("VK_TOKEN")
+TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w"
+
 ADMIN_ID = 47965177
 
+# ДО 11:42 — вовремя
 WORK_END = time(11, 42)
 
 bot = Bot(token=TOKEN)
 
-# =====================
-# DATABASE (POSTGRES)
-# =====================
+# =========================
+# DATABASE
+# =========================
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = "postgresql://postgres:password@host:5432/railway"
+
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
@@ -30,7 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     fines INT DEFAULT 0,
     xp INT DEFAULT 0,
-    level INT DEFAULT 1
+    level INT DEFAULT 1,
+    late_count INT DEFAULT 0
 )
 """)
 
@@ -40,72 +44,91 @@ CREATE TABLE IF NOT EXISTS arrivals (
     user_id BIGINT,
     arrival_date TEXT,
     arrival_time TEXT,
-    arrival_month TEXT
+    arrival_month TEXT,
+    late BOOLEAN
 )
 """)
 
 conn.commit()
 
-# =====================
-# KEYBOARD
-# =====================
+# =========================
+# КНОПКИ
+# =========================
 
 def keyboard():
-    kb = Keyboard(one_time=False)
-    kb.add(Text("🟢 Я на месте")).row()
-    kb.add(Text("📊 Статистика"), Text("🏆 Топ месяца")).row()
-    kb.add(Text("📈 Уровень"))
-    return kb
 
-# =====================
-# GET NAME SAFE
-# =====================
+    kb = Keyboard(one_time=False)
+
+    kb.add(Text("🟢 Я на месте")).row()
+
+    kb.add(
+        Text("📊 Статистика"),
+        Text("🏆 Топ месяца")
+    ).row()
+
+    kb.add(Text("📈 Уровень"))
+
+    return kb.get_json()
+
+# =========================
+# ПОЛУЧЕНИЕ ИМЕНИ
+# =========================
 
 async def get_name(user_id: int):
-    try:
-        u = await bot.api.users.get(user_id)
-        return u[0].first_name
-    except:
-        return "Пользователь"
 
-# =====================
-# XP SYSTEM
-# =====================
+    try:
+        user = await bot.api.users.get(user_ids=user_id)
+
+        if user:
+            return user[0].first_name
+
+    except Exception as e:
+        print(e)
+
+    return "Пользователь"
+
+# =========================
+# XP + LEVEL
+# =========================
 
 def add_xp(user_id: int, amount: int):
-    cursor.execute("SELECT xp, level FROM users WHERE user_id=%s", (user_id,))
+
+    cursor.execute("""
+    SELECT xp, level
+    FROM users
+    WHERE user_id=%s
+    """, (user_id,))
+
     row = cursor.fetchone()
 
     if not row:
-        cursor.execute("""
-        INSERT INTO users (user_id, name)
-        VALUES (%s, %s)
-        ON CONFLICT (user_id) DO NOTHING
-        """, (user_id, "user"))
-        conn.commit()
-        row = (0, 1)
+        return False, 1, 0
 
     xp, level = row
+
     xp += amount
 
-    leveled = False
+    level_up = False
 
+    # 100 XP = LEVEL UP
     while xp >= 100:
         xp -= 100
         level += 1
-        leveled = True
+        level_up = True
 
     cursor.execute("""
-    UPDATE users SET xp=%s, level=%s WHERE user_id=%s
+    UPDATE users
+    SET xp=%s, level=%s
+    WHERE user_id=%s
     """, (xp, level, user_id))
 
     conn.commit()
 
-    return leveled, level, xp
+    return level_up, level, xp
 
-# =====================
+# =========================
 # START
-# =====================
+# =========================
 
 @bot.on.message(text=["/start", "Начать", "start"])
 async def start(message: Message):
@@ -115,35 +138,50 @@ async def start(message: Message):
     cursor.execute("""
     INSERT INTO users (user_id, name)
     VALUES (%s, %s)
-    ON CONFLICT (user_id) DO UPDATE SET name=EXCLUDED.name
+    ON CONFLICT (user_id)
+    DO UPDATE SET name=EXCLUDED.name
     """, (message.from_id, name))
 
     conn.commit()
 
     await message.answer(
-        f"🔥 Привет, {name}\nСистема сотрудников активна.",
+        f"""
+🔥 Привет, {name}
+
+Система учёта сотрудников активна
+""",
         keyboard=keyboard()
     )
 
-# =====================
-# ARRIVE
-# =====================
+# =========================
+# Я НА МЕСТЕ
+# =========================
 
 @bot.on.message(text="🟢 Я на месте")
 async def arrive(message: Message):
 
     now = datetime.now()
+
     today = now.strftime("%Y-%m-%d")
     month = now.strftime("%Y-%m")
-    t = now.strftime("%H:%M:%S")
+    current_time = now.strftime("%H:%M:%S")
+
+    # Уже отмечался?
 
     cursor.execute("""
-    SELECT 1 FROM arrivals
-    WHERE user_id=%s AND arrival_date=%s
+    SELECT 1
+    FROM arrivals
+    WHERE user_id=%s
+    AND arrival_date=%s
     """, (message.from_id, today))
 
     if cursor.fetchone():
-        await message.answer("⚠ Ты уже отмечался сегодня")
+
+        await message.answer(
+            "⚠ Ты уже отмечался сегодня",
+            keyboard=keyboard()
+        )
+
         return
 
     name = await get_name(message.from_id)
@@ -151,58 +189,153 @@ async def arrive(message: Message):
     cursor.execute("""
     INSERT INTO users (user_id, name)
     VALUES (%s, %s)
-    ON CONFLICT (user_id) DO UPDATE SET name=EXCLUDED.name
+    ON CONFLICT (user_id)
+    DO UPDATE SET name=EXCLUDED.name
     """, (message.from_id, name))
+
+    # Проверка опоздания
 
     late = now.time() > WORK_END
 
-    xp_gain = 10 if not late else 3
-    leveled, level, xp = add_xp(message.from_id, xp_gain)
+    # XP
+
+    xp_add = 3 if late else 10
+
+    level_up, level, xp = add_xp(
+        message.from_id,
+        xp_add
+    )
+
+    # Запись прихода
 
     cursor.execute("""
-    INSERT INTO arrivals (user_id, arrival_date, arrival_time, arrival_month)
-    VALUES (%s, %s, %s, %s)
-    """, (message.from_id, today, t, month))
+    INSERT INTO arrivals (
+        user_id,
+        arrival_date,
+        arrival_time,
+        arrival_month,
+        late
+    )
+    VALUES (%s, %s, %s, %s, %s)
+    """, (
+        message.from_id,
+        today,
+        current_time,
+        month,
+        late
+    ))
+
+    # Если опоздал
+
+    text = ""
+
+    if late:
+
+        cursor.execute("""
+        UPDATE users
+        SET late_count = late_count + 1
+        WHERE user_id=%s
+        """, (message.from_id,))
+
+        cursor.execute("""
+        SELECT late_count
+        FROM users
+        WHERE user_id=%s
+        """, (message.from_id,))
+
+        late_count = cursor.fetchone()[0]
+
+        text = f"""
+❌ ОПОЗДАНИЕ
+
+🕒 Время: {current_time}
+📉 +3 XP
+"""
+
+        # Каждое 3-е опоздание = штраф
+
+        if late_count % 3 == 0:
+
+            cursor.execute("""
+            UPDATE users
+            SET fines = fines + 1
+            WHERE user_id=%s
+            """, (message.from_id,))
+
+            text += "\n💸 Получен штраф"
+
+        # Уведомление админу
+
+        try:
+            await bot.api.messages.send(
+                user_id=ADMIN_ID,
+                random_id=0,
+                message=f"⚠ {name} сегодня опоздал"
+            )
+        except:
+            pass
+
+    else:
+
+        text = f"""
+✅ ВОВРЕМЯ
+
+🕒 Время: {current_time}
+⭐ +10 XP
+"""
+
+    if level_up:
+
+        text += f"""
+
+🎉 НОВЫЙ УРОВЕНЬ: {level}
+"""
 
     conn.commit()
 
-    text = "❌ ОПОЗДАНИЕ" if late else "✅ ВОВРЕМЯ"
+    await message.answer(
+        text,
+        keyboard=keyboard()
+    )
 
-    if leveled:
-        text += f"\n🎉 LEVEL UP → {level}"
-
-    await message.answer(text, keyboard=keyboard())
-
-# =====================
-# STATISTICS
-# =====================
+# =========================
+# СТАТИСТИКА
+# =========================
 
 @bot.on.message(text="📊 Статистика")
 async def stats(message: Message):
 
     cursor.execute("""
-    SELECT name, xp, level, fines FROM users
+    SELECT name, fines, xp, level
+    FROM users
     WHERE user_id=%s
     """, (message.from_id,))
 
     row = cursor.fetchone()
 
     if not row:
-        await message.answer("Нет данных")
+
+        await message.answer(
+            "❌ Нет данных",
+            keyboard=keyboard()
+        )
+
         return
 
     await message.answer(f"""
 📊 СТАТИСТИКА
 
-👤 {row[0]}
-📈 Level: {row[2]}
-⭐ XP: {row[1]}/100
-💸 Штрафы: {row[3]}
-""")
+👤 Имя: {row[0]}
 
-# =====================
-# TOP MONTH
-# =====================
+📈 Уровень: {row[3]}
+⭐ XP: {row[2]}/100
+
+💸 Штрафы: {row[1]}
+""", keyboard=keyboard())
+
+# =========================
+# ТОП МЕСЯЦА
+# =========================
 
 @bot.on.message(text="🏆 Топ месяца")
 async def top_month(message: Message):
@@ -210,51 +343,87 @@ async def top_month(message: Message):
     month = datetime.now().strftime("%Y-%m")
 
     cursor.execute("""
-    SELECT COALESCE(u.name, 'Пользователь'), u.level, COUNT(a.user_id)
+    SELECT
+        COALESCE(u.name, 'Пользователь'),
+        u.level,
+        COUNT(a.user_id)
     FROM arrivals a
-    LEFT JOIN users u ON u.user_id=a.user_id
+    LEFT JOIN users u
+    ON u.user_id = a.user_id
     WHERE a.arrival_month=%s
-    GROUP BY u.name, u.level, a.user_id
+    GROUP BY a.user_id, u.name, u.level
     ORDER BY COUNT(a.user_id) DESC
+    LIMIT 10
     """, (month,))
 
     rows = cursor.fetchall()
 
     if not rows:
-        await message.answer("📭 Пока нет данных")
+
+        await message.answer(
+            "📭 Пока нет данных",
+            keyboard=keyboard()
+        )
+
         return
 
     text = f"🏆 ТОП МЕСЯЦА ({month})\n\n"
 
-    for i, (name, lvl, cnt) in enumerate(rows):
-        medal = ["🥇","🥈","🥉"][i] if i < 3 else "👤"
-        text += f"{medal} {name} (Lv.{lvl}) — {cnt}\n"
+    medals = ["🥇", "🥈", "🥉"]
 
-    await message.answer(text)
+    for i, row in enumerate(rows):
 
-# =====================
-# LEVEL
-# =====================
+        medal = medals[i] if i < 3 else "👤"
+
+        text += f"""
+{medal} {row[0]}
+📈 Lv.{row[1]}
+📅 Дней: {row[2]}
+
+"""
+
+    await message.answer(
+        text,
+        keyboard=keyboard()
+    )
+
+# =========================
+# УРОВЕНЬ
+# =========================
 
 @bot.on.message(text="📈 Уровень")
 async def level(message: Message):
 
     cursor.execute("""
-    SELECT xp, level FROM users WHERE user_id=%s
+    SELECT xp, level
+    FROM users
+    WHERE user_id=%s
     """, (message.from_id,))
 
-    row = cursor.fetchone() or (0, 1)
+    row = cursor.fetchone()
+
+    if not row:
+
+        await message.answer(
+            "❌ Нет данных",
+            keyboard=keyboard()
+        )
+
+        return
 
     await message.answer(f"""
-📈 УРОВЕНЬ
+📈 ТВОЙ УРОВЕНЬ
 
 🏅 Level: {row[1]}
 ⭐ XP: {row[0]}/100
-""")
 
-# =====================
+📌 100 XP = новый уровень
+""", keyboard=keyboard())
+
+# =========================
 # RUN
-# =====================
+# =========================
 
 print("BOT STARTED")
+
 bot.run_forever()
