@@ -30,7 +30,7 @@ cursor = db.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
-    name TEXT DEFAULT '',
+    name TEXT,
     balance INTEGER DEFAULT 0,
     total_arrivals INTEGER DEFAULT 0,
     on_time INTEGER DEFAULT 0,
@@ -56,39 +56,57 @@ db.commit()
 # =====================
 
 GOOD_MESSAGES = [
-    "🔥 Красавчик!",
-    "💪 Отлично!",
-    "🚀 Так держать!",
-    "😎 Босс доволен!",
+    "🔥 Отлично!",
+    "💪 Молодец!",
+    "🚀 Красавчик!",
+    "😎 Так держать!"
 ]
 
 LATE_MESSAGES = [
     "😴 Опоздал",
     "⌛ Поздно пришёл",
-    "⚠ Дисциплина страдает",
+    "⚠ Дисциплина падает",
     "📉 Минус"
 ]
 
 # =====================
-# KEYBOARD
+# KEYBOARD (PAYLOAD MODE)
 # =====================
 
 def get_keyboard(admin=False):
     kb = Keyboard(one_time=False)
 
-    kb.add(Text("🟢 Я на месте"), color=KeyboardButtonColor.POSITIVE).row()
-    kb.add(Text("💰 Баланс"), color=KeyboardButtonColor.PRIMARY)
-    kb.add(Text("🏆 Топ"), color=KeyboardButtonColor.SECONDARY).row()
-    kb.add(Text("📊 Статистика"), color=KeyboardButtonColor.PRIMARY)
+    kb.add(
+        Text("🟢 Я на месте", payload={"cmd": "arrive"}),
+        color=KeyboardButtonColor.POSITIVE
+    ).row()
+
+    kb.add(
+        Text("💰 Баланс", payload={"cmd": "balance"}),
+        color=KeyboardButtonColor.PRIMARY
+    )
+
+    kb.add(
+        Text("🏆 Топ", payload={"cmd": "top"}),
+        color=KeyboardButtonColor.SECONDARY
+    ).row()
+
+    kb.add(
+        Text("📊 Статистика", payload={"cmd": "stats"}),
+        color=KeyboardButtonColor.PRIMARY
+    )
 
     if admin:
         kb.row()
-        kb.add(Text("⚙ Админ-панель"), color=KeyboardButtonColor.NEGATIVE)
+        kb.add(
+            Text("⚙ Админ", payload={"cmd": "admin"}),
+            color=KeyboardButtonColor.NEGATIVE
+        )
 
-    return kb.get_json()
+    return kb.get_keyboard()
 
 # =====================
-# SAFE VK NAME
+# SAFE NAME
 # =====================
 
 async def get_name(user_id: int):
@@ -122,17 +140,43 @@ async def start(message: Message):
     )
 
 # =====================
+# ROUTER (MAIN FIX)
+# =====================
+
+@bot.on.message()
+async def router(message: Message):
+
+    payload = message.payload or {}
+    cmd = payload.get("cmd")
+
+    if not cmd:
+        return
+
+    if cmd == "arrive":
+        await arrive(message)
+
+    elif cmd == "balance":
+        await balance(message)
+
+    elif cmd == "stats":
+        await stats(message)
+
+    elif cmd == "top":
+        await top(message)
+
+    elif cmd == "admin":
+        await admin(message)
+
+# =====================
 # ARRIVE
 # =====================
 
-@bot.on.message(text="🟢 Я на месте")
 async def arrive(message: Message):
 
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M:%S")
 
-    # уже отмечался
     cursor.execute("""
     SELECT 1 FROM arrivals
     WHERE user_id=? AND arrival_date=?
@@ -149,13 +193,11 @@ async def arrive(message: Message):
     VALUES (?, ?, ?, ?)
     """, (message.from_id, name, current_time, today))
 
-    # position safe
     cursor.execute("""
     SELECT COUNT(*) FROM arrivals WHERE arrival_date=?
     """, (today,))
 
-    row = cursor.fetchone()
-    position = row[0] if row else 0
+    position = cursor.fetchone()[0]
 
     work_time = now.replace(
         hour=WORK_HOUR,
@@ -185,12 +227,11 @@ async def arrive(message: Message):
         SELECT on_time FROM users WHERE user_id=?
         """, (message.from_id,))
 
-        row = cursor.fetchone()
-        on_time = row[0] if row else 0
+        on_time = cursor.fetchone()[0]
 
         bonus_text = ""
 
-        if on_time > 0 and on_time % 30 == 0:
+        if on_time and on_time % 30 == 0:
             cursor.execute("""
             UPDATE users
             SET balance = balance + ?
@@ -226,12 +267,11 @@ async def arrive(message: Message):
         SELECT late_count FROM users WHERE user_id=?
         """, (message.from_id,))
 
-        row = cursor.fetchone()
-        late_count = row[0] if row else 0
+        late_count = cursor.fetchone()[0]
 
         penalty_text = ""
 
-        if late_count > 0 and late_count % 3 == 0:
+        if late_count and late_count % 3 == 0:
             cursor.execute("""
             UPDATE users
             SET balance = balance - ?
@@ -255,23 +295,24 @@ async def arrive(message: Message):
 # BALANCE
 # =====================
 
-@bot.on.message(text="💰 Баланс")
 async def balance(message: Message):
 
-    cursor.execute("SELECT balance, streak FROM users WHERE user_id=?", (message.from_id,))
+    cursor.execute("""
+    SELECT balance, streak FROM users WHERE user_id=?
+    """, (message.from_id,))
+
     row = cursor.fetchone()
 
     if not row:
         await message.answer("Сначала /start")
         return
 
-    await message.answer(f"💰 {row[0]}₽\n🔥 {row[1]}")
+    await message.answer(f"💰 {row[0]}₽\n🔥 Серия: {row[1]}")
 
 # =====================
 # STATS
 # =====================
 
-@bot.on.message(text="📊 Статистика")
 async def stats(message: Message):
 
     cursor.execute("""
@@ -286,7 +327,7 @@ async def stats(message: Message):
         return
 
     await message.answer(f"""
-📊
+📊 Статистика
 
 ✅ {row[1]}
 ❌ {row[2]}
@@ -297,7 +338,6 @@ async def stats(message: Message):
 # TOP
 # =====================
 
-@bot.on.message(text="🏆 Топ")
 async def top(message: Message):
 
     cursor.execute("""
@@ -313,7 +353,7 @@ async def top(message: Message):
     medals = ["🥇", "🥈", "🥉"]
 
     for i, r in enumerate(rows):
-        name = r[0] or "Без имени"
+        name = r[0] or "Пользователь"
         text += f"{medals[i] if i < 3 else '👤'} {name} — {r[1]}\n"
 
     await message.answer(text)
@@ -322,7 +362,6 @@ async def top(message: Message):
 # ADMIN
 # =====================
 
-@bot.on.message(text="⚙ Админ-панель")
 async def admin(message: Message):
 
     if message.from_id != ADMIN_ID:
