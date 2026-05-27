@@ -11,6 +11,7 @@ from vkbottle import Keyboard, Text
 
 TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w"
 ADMIN_ID = 47965177
+
 WORK_END = time(11, 42)
 
 bot = Bot(token=TOKEN)
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS arrivals (
 db.commit()
 
 # =====================
-# MONTH
+# MONTH SYSTEM
 # =====================
 
 def check_month():
@@ -57,7 +58,7 @@ def check_month():
         CURRENT_MONTH = now
 
 # =====================
-# XP SYSTEM (100 XP = 1 LEVEL)
+# XP SYSTEM
 # =====================
 
 def add_xp(user_id: int, amount: int):
@@ -65,8 +66,11 @@ def add_xp(user_id: int, amount: int):
     row = cursor.fetchone()
 
     if not row:
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, name) VALUES (?, ?)",
-                       (user_id, "user"))
+        cursor.execute("""
+        INSERT OR IGNORE INTO users (user_id, name)
+        VALUES (?, ?)
+        """, (user_id, "user"))
+
         cursor.execute("SELECT xp, level FROM users WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
 
@@ -75,7 +79,6 @@ def add_xp(user_id: int, amount: int):
 
     leveled = False
 
-    # 100 XP = 1 level (твоя логика месяца)
     while xp >= 100:
         xp -= 100
         level += 1
@@ -88,24 +91,29 @@ def add_xp(user_id: int, amount: int):
     return leveled, level, xp
 
 # =====================
+# ADMIN NOTIFY
+# =====================
+
+async def notify_admin(text: str):
+    try:
+        await bot.api.messages.send(
+            peer_id=ADMIN_ID,
+            message=text,
+            random_id=0
+        )
+    except:
+        pass
+
+# =====================
 # KEYBOARD
 # =====================
 
-def badge(level):
-    if level <= 2:
-        return "👶"
-    elif level <= 5:
-        return "💼"
-    else:
-        return "🔥"
-
-def kb_main(level=1, xp=0):
+def kb_main():
     kb = Keyboard(one_time=False)
     kb.add(Text("🟢 Я на месте")).row()
     kb.add(Text("📊 Статистика"))
-    kb.add(Text("🏆 Топ месяц")).row()
+    kb.add(Text("🏆 ТОП МЕСЯЦА")).row()
     kb.add(Text("📈 Уровень"))
-
     return kb
 
 def kb_back():
@@ -126,7 +134,7 @@ async def router(message: Message):
         await arrive(message)
     elif "статистика" in text:
         await stats(message)
-    elif "топ" in text:
+    elif "топ месяца" in text:
         await top_month(message)
     elif "уровень" in text:
         await level(message)
@@ -146,6 +154,7 @@ async def arrive(message: Message):
     month = now.strftime("%Y-%m")
     t = now.strftime("%H:%M:%S")
 
+    # уже отмечался?
     cursor.execute("""
     SELECT 1 FROM arrivals
     WHERE user_id=? AND arrival_date=?
@@ -154,6 +163,19 @@ async def arrive(message: Message):
     if cursor.fetchone():
         await message.answer("⚠ Уже отмечался")
         return
+
+    # СТАРТОВОЕ СОХРАНЕНИЕ ИМЕНИ (ВАЖНО)
+    try:
+        user = await bot.api.users.get(message.from_id)
+        name = user[0].first_name
+    except:
+        name = "Без имени"
+
+    cursor.execute("""
+    INSERT INTO users (user_id, name)
+    VALUES (?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET name=excluded.name
+    """, (message.from_id, name))
 
     cursor.execute("""
     INSERT INTO arrivals (user_id, arrival_date, arrival_time, arrival_month)
@@ -165,6 +187,15 @@ async def arrive(message: Message):
     xp_gain = 10 if not late else 3
     leveled, level, xp = add_xp(message.from_id, xp_gain)
 
+    if late:
+        cursor.execute("""
+        UPDATE users SET fines = fines + 1 WHERE user_id=?
+        """, (message.from_id,))
+
+        await notify_admin(
+            f"⚠ ОПОЗДАНИЕ\n👤 {name}\n🕒 {t}\n📅 {today}"
+        )
+
     db.commit()
 
     text = "❌ Опоздание" if late else "✅ Вовремя"
@@ -175,7 +206,7 @@ async def arrive(message: Message):
     await message.answer(text)
 
 # =====================
-# STATS (UPDATED)
+# STATS
 # =====================
 
 async def stats(message: Message):
@@ -190,16 +221,11 @@ async def stats(message: Message):
     total = cursor.fetchone()[0]
 
     cursor.execute("""
-    SELECT fines, level, xp FROM users
+    SELECT fines, level, xp, name FROM users
     WHERE user_id=?
     """, (message.from_id,))
 
-    r = cursor.fetchone() or (0, 1, 0)
-
-    lvl = r[1]
-    xp = r[2]
-
-    progress = f"{xp}/100"
+    r = cursor.fetchone() or (0, 1, 0, "Без имени")
 
     await message.answer(f"""
 📊 СТАТИСТИКА
@@ -207,14 +233,14 @@ async def stats(message: Message):
 📅 Месяц: {month}
 📅 Приходов: {total}
 
-📈 Уровень: {lvl} {badge(lvl)}
-⭐ XP: {progress}
-
+👤 Имя: {r[3]}
+📈 Уровень: {r[1]}
+⭐ XP: {r[2]}/100
 💸 Штрафы: {r[0]}
 """, keyboard=kb_back())
 
 # =====================
-# TOP MONTH (WITH LEVEL)
+# ТОП МЕСЯЦА (ИМЕНА ИСПРАВЛЕНЫ)
 # =====================
 
 async def top_month(message: Message):
@@ -233,10 +259,10 @@ async def top_month(message: Message):
     rows = cursor.fetchall()
 
     if not rows:
-        await message.answer("📭 Нет данных")
+        await message.answer("📭 Нет данных за месяц")
         return
 
-    text = f"🏆 ТОП МЕСЯЦ ({month})\n\n"
+    text = f"🏆 ТОП МЕСЯЦА ({month})\n\n"
 
     for i, (name, level, cnt) in enumerate(rows):
         medal = ["🥇", "🥈", "🥉"][i] if i < 3 else "👤"
@@ -245,7 +271,7 @@ async def top_month(message: Message):
     await message.answer(text, keyboard=kb_back())
 
 # =====================
-# LEVEL VIEW
+# LEVEL
 # =====================
 
 async def level(message: Message):
@@ -256,16 +282,13 @@ async def level(message: Message):
 
     r = cursor.fetchone() or (1, 0)
 
-    lvl = r[0]
-    xp = r[1]
-
-    percent = int((xp / 100) * 100)
+    percent = int((r[1] / 100) * 100)
 
     await message.answer(f"""
 📈 УРОВЕНЬ
 
-🏅 Level: {lvl} {badge(lvl)}
-⭐ XP: {xp}/100
+🏅 Level: {r[0]}
+⭐ XP: {r[1]}/100
 📊 Прогресс: {percent}%
 """, keyboard=kb_back())
 
