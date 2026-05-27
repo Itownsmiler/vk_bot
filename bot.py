@@ -118,7 +118,12 @@ async def get_user_name(user_id: int):
     try:
         users = await bot.api.users.get(user_ids=user_id)
         if users:
-            return users[0].first_name
+           user_info = await bot.api.users.get(user_ids=message.from_id)
+
+if not user_info:
+    name = "Пользователь"
+else:
+    name = user_info[0].first_name
     except Exception as e:
         print("VK API error:", e)
 
