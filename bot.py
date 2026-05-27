@@ -13,7 +13,7 @@ from vkbottle import Keyboard, Text
 TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w"
 ADMIN_ID = 47965177
 
-WORK_END = time(11, 42)  # после этого считается опоздание
+WORK_END = time(11, 42)
 
 bot = Bot(token=TOKEN)
 
@@ -28,9 +28,6 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     name TEXT,
-    total_arrivals INTEGER DEFAULT 0,
-    on_time INTEGER DEFAULT 0,
-    late_count INTEGER DEFAULT 0,
     fines INTEGER DEFAULT 0
 )
 """)
@@ -40,7 +37,8 @@ CREATE TABLE IF NOT EXISTS arrivals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     arrival_date TEXT,
-    arrival_time TEXT
+    arrival_time TEXT,
+    arrival_month TEXT
 )
 """)
 
@@ -50,56 +48,45 @@ db.commit()
 # KEYBOARD
 # =====================
 
-def main_kb(admin=False):
+def kb_main(admin=False):
     kb = Keyboard(one_time=False)
-
     kb.add(Text("🟢 Я на месте")).row()
     kb.add(Text("📊 Статистика"))
-    kb.add(Text("🏆 Топ")).row()
+    kb.add(Text("🏆 Топ месяц")).row()
 
     if admin:
         kb.add(Text("⚙ Админ"))
 
     return kb
 
-
-def back_kb():
+def kb_back():
     kb = Keyboard(one_time=False)
     kb.add(Text("⬅ Назад"))
     return kb
 
 # =====================
-# SAFE COMMAND DETECTOR (100% FIX)
+# SAFE CMD
 # =====================
 
-def get_command(message: Message):
-    """
-    НИКАКИХ .get() — только безопасная обработка
-    """
-
+def get_cmd(message: Message):
     payload = message.payload
 
-    # если None
     if not payload:
-        payload = {}
+        return None
 
-    # если строка
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
         except:
-            payload = {}
+            return None
 
-    # если dict
     if isinstance(payload, dict):
-        cmd = payload.get("cmd")
-        if cmd:
-            return cmd
+        return payload.get("cmd")
 
     return None
 
 # =====================
-# ROUTER (STABLE)
+# ROUTER
 # =====================
 
 @bot.on.message()
@@ -108,18 +95,18 @@ async def router(message: Message):
     print("TEXT:", message.text)
     print("PAYLOAD:", message.payload)
 
+    cmd = get_cmd(message)
     text = (message.text or "").lower()
-    cmd = get_command(message)
 
-    # fallback по тексту (ВАЖНО)
     if not cmd:
-
         if "я на месте" in text:
             cmd = "arrive"
         elif "статистика" in text:
             cmd = "stats"
         elif "топ" in text:
             cmd = "top"
+        elif "топ месяц" in text:
+            cmd = "top_month"
         elif "админ" in text:
             cmd = "admin"
         elif "назад" in text:
@@ -132,21 +119,22 @@ async def router(message: Message):
         await arrive(message)
     elif cmd == "stats":
         await stats(message)
-    elif cmd == "top":
-        await top(message)
+    elif cmd == "top_month":
+        await top_month(message)
     elif cmd == "admin":
         await admin(message)
     elif cmd == "back":
         await back(message)
 
 # =====================
-# ARRIVE LOGIC
+# ARRIVE (MONTH FIX)
 # =====================
 
 async def arrive(message: Message):
 
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
+    month = now.strftime("%Y-%m")
     t = now.strftime("%H:%M:%S")
 
     cursor.execute("""
@@ -155,110 +143,98 @@ async def arrive(message: Message):
     """, (message.from_id, today))
 
     if cursor.fetchone():
-        await message.answer("⚠ Уже отмечался сегодня")
+        await message.answer("⚠ Уже отмечался")
         return
 
     cursor.execute("""
-    INSERT INTO arrivals (user_id, arrival_date, arrival_time)
-    VALUES (?, ?, ?)
-    """, (message.from_id, today, t))
-
-    late = now.time() > WORK_END
-
-    cursor.execute("""
-    INSERT OR IGNORE INTO users (user_id, name)
+    INSERT INTO users (user_id, name)
     VALUES (?, ?)
+    ON CONFLICT(user_id) DO NOTHING
     """, (message.from_id, "user"))
 
     cursor.execute("""
-    UPDATE users
-    SET total_arrivals = total_arrivals + 1
-    WHERE user_id=?
-    """, (message.from_id,))
+    INSERT INTO arrivals (user_id, arrival_date, arrival_time, arrival_month)
+    VALUES (?, ?, ?, ?)
+    """, (message.from_id, today, t, month))
+
+    late = now.time() > WORK_END
 
     if not late:
-
-        cursor.execute("""
-        UPDATE users
-        SET on_time = on_time + 1
-        WHERE user_id=?
-        """, (message.from_id,))
-
         text = f"✅ Вовремя\n🕒 {t}"
-
     else:
+        text = f"❌ Опоздание\n🕒 {t}"
 
         cursor.execute("""
-        UPDATE users
-        SET late_count = late_count + 1
-        WHERE user_id=?
+        UPDATE users SET fines = fines + 1 WHERE user_id=?
         """, (message.from_id,))
-
-        cursor.execute("""
-        SELECT late_count FROM users WHERE user_id=?
-        """, (message.from_id,))
-
-        late = cursor.fetchone()[0]
-
-        penalty = ""
-        if late % 3 == 0:
-            cursor.execute("""
-            UPDATE users
-            SET fines = fines + 1
-            WHERE user_id=?
-            """, (message.from_id,))
-            penalty = "\n💸 ШТРАФ!"
-
-        text = f"❌ Опоздание\n🕒 {t}{penalty}"
 
     db.commit()
     await message.answer(text)
 
 # =====================
-# STATS
+# STATS (MONTH)
 # =====================
 
 async def stats(message: Message):
 
+    month = datetime.now().strftime("%Y-%m")
+
     cursor.execute("""
-    SELECT total_arrivals, on_time, late_count, fines
-    FROM users WHERE user_id=?
+    SELECT COUNT(*)
+    FROM arrivals
+    WHERE user_id=? AND arrival_month=?
+    """, (message.from_id, month))
+
+    total = cursor.fetchone()[0]
+
+    cursor.execute("""
+    SELECT COUNT(*)
+    FROM arrivals
+    WHERE user_id=? AND arrival_month=? AND arrival_time <= ?
+    """, (message.from_id, month, "11:42:00"))
+
+    on_time = cursor.fetchone()[0]
+
+    cursor.execute("""
+    SELECT fines FROM users WHERE user_id=?
     """, (message.from_id,))
 
-    r = cursor.fetchone()
-
-    if not r:
-        r = (0, 0, 0, 0)
+    fines = cursor.fetchone()
+    fines = fines[0] if fines else 0
 
     await message.answer(f"""
-📊 СТАТИСТИКА
+📊 СТАТИСТИКА ({month})
 
-📅 Всего: {r[0]}
-✅ Вовремя: {r[1]}
-❌ Опоздания: {r[2]}
-💸 Штрафы: {r[3]}
-""", keyboard=back_kb())
+📅 Всего: {total}
+✅ Вовремя: {on_time}
+💸 Штрафы: {fines}
+""", keyboard=kb_back())
 
 # =====================
-# TOP
+# TOP MONTH
 # =====================
 
-async def top(message: Message):
+async def top_month(message: Message):
+
+    month = datetime.now().strftime("%Y-%m")
 
     cursor.execute("""
-    SELECT user_id, on_time FROM users
-    ORDER BY on_time DESC
+    SELECT user_id, COUNT(*) as cnt
+    FROM arrivals
+    WHERE arrival_month=?
+    GROUP BY user_id
+    ORDER BY cnt DESC
     LIMIT 10
-    """)
+    """, (month,))
 
     rows = cursor.fetchall()
 
-    text = "🏆 ТОП\n\n"
+    text = f"🏆 ТОП МЕСЯЦ ({month})\n\n"
 
     for i, r in enumerate(rows):
-        text += f"{i+1}. user{r[0]} — {r[1]}\n"
+        text += f"{i+1}. user{r[0]} — {r[1]} приходов\n"
 
-    await message.answer(text, keyboard=back_kb())
+    await message.answer(text, keyboard=kb_back())
 
 # =====================
 # ADMIN
@@ -269,13 +245,23 @@ async def admin(message: Message):
     if message.from_id != ADMIN_ID:
         return
 
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM arrivals")
+    all_time = cursor.fetchone()[0]
 
-    await message.answer(
-        f"⚙ АДМИН\n👥 Пользователей: {users}",
-        keyboard=back_kb()
-    )
+    month = datetime.now().strftime("%Y-%m")
+
+    cursor.execute("""
+    SELECT COUNT(*) FROM arrivals WHERE arrival_month=?
+    """, (month,))
+
+    this_month = cursor.fetchone()[0]
+
+    await message.answer(f"""
+⚙ АДМИН
+
+📊 Всего: {all_time}
+📅 Этот месяц: {this_month}
+""", keyboard=kb_back())
 
 # =====================
 # BACK
@@ -284,11 +270,11 @@ async def admin(message: Message):
 async def back(message: Message):
     await message.answer(
         "🏠 Меню",
-        keyboard=main_kb(message.from_id == ADMIN_ID)
+        keyboard=kb_main(message.from_id == ADMIN_ID)
     )
 
 # =====================
-# START
+# RUN
 # =====================
 
 print("BOT STARTED")
