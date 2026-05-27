@@ -1,353 +1,373 @@
-import asyncio
 import sqlite3
+import random
 from datetime import datetime
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-TOKEN = "vk1.a.wzeSitSagSCPDO4ll1fIbYXy-AfL1Vnvg85dUxqnwtMUmBXu91NFBL7faT4v7JZb83tXIKCCtxXgDs_fbrXKh8teikpJG0sTHSYXZW1M7zWCcHvBOLZDuSAmDKo2EjHOZTCNMnrqrUBhpFLNsXkEUvjmOLa5OI09vYDigzJmo-cS4TEYem5x6dTTEj8h7p3_LN2WY-vN_dte7ikft86O_w"
+# =========================
+# НАСТРОЙКИ
+# =========================
+
+TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w"
 ADMIN_ID = 47965177
+
+# Время прихода
+WORK_HOUR = 9
+WORK_MINUTE = 0
+
+# Бонусы
+BONUS_FOR_30 = 1000
+PENALTY_FOR_3_LATE = 1000
+
+# =========================
+# БОТ
+# =========================
 
 bot = Bot(token=TOKEN)
 
-db = sqlite3.connect("database.db")
-sql = db.cursor()
+# =========================
+# БАЗА
+# =========================
 
-sql.execute("""
+db = sqlite3.connect("workers.db")
+cursor = db.cursor()
+
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER,
+    user_id INTEGER PRIMARY KEY,
     name TEXT,
-    arrivals INTEGER DEFAULT 0,
-    late INTEGER DEFAULT 0,
-    money INTEGER DEFAULT 0,
-    last_day TEXT
+    balance INTEGER DEFAULT 0,
+    total_arrivals INTEGER DEFAULT 0,
+    on_time INTEGER DEFAULT 0,
+    late_count INTEGER DEFAULT 0,
+    streak INTEGER DEFAULT 0
 )
 """)
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS arrivals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    name TEXT,
+    arrival_time TEXT,
+    arrival_date TEXT
+)
+""")
+
 db.commit()
 
+# =========================
+# ФРАЗЫ
+# =========================
 
-def menu_keyboard():
+GOOD_MESSAGES = [
+    "🔥 Красавчик! Первый на месте!",
+    "💪 Отличная дисциплина!",
+    "🚀 Машина! Так держать!",
+    "😎 Босс уже доволен тобой!",
+    "🏆 Сегодня ты в топе!"
+]
+
+LATE_MESSAGES = [
+    "😴 Проспал что ли?",
+    "⌛ Опоздание записано...",
+    "👀 Коллектив уже работает!",
+    "⚠ Надо приходить раньше!",
+    "📉 Минус к дисциплине"
+]
+
+# =========================
+# КЛАВИАТУРА
+# =========================
+
+def get_keyboard(admin=False):
     keyboard = Keyboard(one_time=False)
 
     keyboard.add(
-        Text("✅ Я на месте"),
+        Text("🟢 Я на месте"),
         color=KeyboardButtonColor.POSITIVE
-    )
-
-    keyboard.row()
+    ).row()
 
     keyboard.add(
-        Text("🏆 Рейтинг"),
+        Text("💰 Баланс"),
         color=KeyboardButtonColor.PRIMARY
     )
 
     keyboard.add(
-        Text("💰 Баланс"),
+        Text("🏆 Топ"),
         color=KeyboardButtonColor.SECONDARY
-    )
-
-    keyboard.row()
+    ).row()
 
     keyboard.add(
         Text("📊 Статистика"),
         color=KeyboardButtonColor.PRIMARY
     )
 
-    return keyboard.get_json()
-
-
-def admin_keyboard():
-    keyboard = Keyboard(one_time=False)
-
-    keyboard.add(
-        Text("👑 Админ панель"),
-        color=KeyboardButtonColor.NEGATIVE
-    )
-
-    keyboard.row()
-
-    keyboard.add(
-        Text("🏆 Рейтинг"),
-        color=KeyboardButtonColor.PRIMARY
-    )
-
-    keyboard.add(
-        Text("💰 Баланс"),
-        color=KeyboardButtonColor.SECONDARY
-    )
-
-    keyboard.row()
-
-    keyboard.add(
-        Text("📊 Статистика"),
-        color=KeyboardButtonColor.PRIMARY
-    )
+    if admin:
+        keyboard.row()
+        keyboard.add(
+            Text("⚙ Админ-панель"),
+            color=KeyboardButtonColor.NEGATIVE
+        )
 
     return keyboard.get_json()
 
+# =========================
+# START
+# =========================
 
-@bot.on.message(text=["/start", "Начать"])
+@bot.on.message(text=["Начать", "/start", "start"])
 async def start(message: Message):
+    user = await bot.api.users.get(message.from_id)
 
-    user = message.from_id
-    name = f"{message.from_user.first_name}"
+    name = user[0].first_name
 
-    sql.execute(
-        "SELECT * FROM users WHERE user_id = ?",
-        (user,)
+    cursor.execute(
+        "INSERT OR IGNORE INTO users (user_id, name) VALUES (?, ?)",
+        (message.from_id, name)
+    )
+    db.commit()
+
+    await message.answer(
+        f"""🔥 Привет, {name}!
+
+Добро пожаловать в систему учета сотрудников 👇""",
+        keyboard=get_keyboard(message.from_id == ADMIN_ID)
     )
 
-    check = sql.fetchone()
+# =========================
+# ПРИБЫТИЕ
+# =========================
 
-    if not check:
-        sql.execute(
-            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-            (user, name, 0, 0, 0, "")
-        )
-        db.commit()
-
-    text = f"""
-🔥 Добро пожаловать, {name}
-
-Этот бот считает:
-✅ Приходы
-⏰ Опоздания
-💰 Баланс
-🏆 Рейтинг сотрудников
-
-Нажимай кнопку ниже 👇
-"""
-
-    if user == ADMIN_ID:
-        await message.answer(
-            text,
-            keyboard=admin_keyboard()
-        )
-    else:
-        await message.answer(
-            text,
-            keyboard=menu_keyboard()
-        )
-
-
-@bot.on.message(text="✅ Я на месте")
+@bot.on.message(text="🟢 Я на месте")
 async def arrive(message: Message):
-
-    user = message.from_id
     now = datetime.now()
 
-    current_time = now.strftime("%H:%M")
-    current_day = now.strftime("%Y-%m-%d")
+    today = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%H:%M:%S")
 
-    sql.execute(
-        "SELECT * FROM users WHERE user_id = ?",
-        (user,)
-    )
+    cursor.execute("""
+    SELECT * FROM arrivals
+    WHERE user_id = ? AND arrival_date = ?
+    """, (message.from_id, today))
 
-    data = sql.fetchone()
+    already = cursor.fetchone()
 
-    if data[5] == current_day:
-        await message.answer(
-            f"⚠️ Ты уже отмечался сегодня\n\n🕒 Время: {current_time}"
-        )
+    if already:
+        await message.answer("⚠ Ты уже отмечался сегодня.")
         return
 
-    hour = now.hour
-    minute = now.minute
+    user = await bot.api.users.get(message.from_id)
+    name = user[0].first_name
 
-    total_minutes = hour * 60 + minute
+    cursor.execute("""
+    INSERT INTO arrivals (user_id, name, arrival_time, arrival_date)
+    VALUES (?, ?, ?, ?)
+    """, (
+        message.from_id,
+        name,
+        current_time,
+        today
+    ))
 
-    start_minutes = 9 * 60
+    cursor.execute("""
+    SELECT COUNT(*) FROM arrivals
+    WHERE arrival_date = ?
+    """, (today,))
 
-    money = data[4]
-    arrivals = data[2]
-    late = data[3]
+    position = cursor.fetchone()[0]
 
-    if total_minutes <= start_minutes:
+    work_time = now.replace(
+        hour=WORK_HOUR,
+        minute=WORK_MINUTE,
+        second=0
+    )
 
-        arrivals += 1
-        money += 100
+    if now <= work_time:
+        reward = 100
 
-        bonus_texts = [
-            "🔥 Красавчик! Пришел вовремя",
-            "💪 Идеальная дисциплина",
-            "🏆 Ты сегодня в топе",
-            "⚡ Быстро четко мощно",
-            "😎 Начальство довольно тобой"
-        ]
+        if position == 1:
+            reward += 50
 
-        import random
-        phrase = random.choice(bonus_texts)
-
-        if arrivals % 30 == 0:
-            money += 1000
-            bonus = "\n🎁 Бонус за 30 приходов: +1000₽"
-        else:
-            bonus = ""
-
-        sql.execute("""
+        cursor.execute("""
         UPDATE users
-        SET arrivals = ?, money = ?, last_day = ?
+        SET
+            balance = balance + ?,
+            total_arrivals = total_arrivals + 1,
+            on_time = on_time + 1,
+            streak = streak + 1
         WHERE user_id = ?
-        """, (
-            arrivals,
-            money,
-            current_day,
-            user
-        ))
+        """, (reward, message.from_id))
 
-        db.commit()
+        # бонус за 30 вовремя
+        cursor.execute("""
+        SELECT on_time FROM users
+        WHERE user_id = ?
+        """, (message.from_id,))
 
-        await message.answer(
-            f"""
-{phrase}
+        on_time = cursor.fetchone()[0]
+
+        bonus_text = ""
+
+        if on_time % 30 == 0:
+            cursor.execute("""
+            UPDATE users
+            SET balance = balance + ?
+            WHERE user_id = ?
+            """, (BONUS_FOR_30, message.from_id))
+
+            bonus_text = f"\n🎁 Бонус +{BONUS_FOR_30}₽ за 30 приходов вовремя!"
+
+        text = f"""
+✅ {random.choice(GOOD_MESSAGES)}
 
 🕒 Время: {current_time}
-
-💰 +100₽
-💵 Баланс: {money}₽
-🏆 Приходов вовремя: {arrivals}
-{bonus}
+🏆 Место сегодня: #{position}
+💰 Получено: +{reward}₽
+{bonus_text}
 """
-        )
 
     else:
-
-        late += 1
-        money -= 1000
-
-        sql.execute("""
+        cursor.execute("""
         UPDATE users
-        SET late = ?, money = ?, last_day = ?
+        SET
+            total_arrivals = total_arrivals + 1,
+            late_count = late_count + 1,
+            streak = 0
         WHERE user_id = ?
-        """, (
-            late,
-            money,
-            current_day,
-            user
-        ))
+        """, (message.from_id,))
 
-        db.commit()
+        cursor.execute("""
+        SELECT late_count FROM users
+        WHERE user_id = ?
+        """, (message.from_id,))
 
-        await message.answer(
-            f"""
-🚨 ОПОЗДАНИЕ
+        late_count = cursor.fetchone()[0]
 
-⏰ Время: {current_time}
+        penalty_text = ""
 
-💸 Штраф: -1000₽
-💵 Баланс: {money}₽
+        if late_count % 3 == 0:
+            cursor.execute("""
+            UPDATE users
+            SET balance = balance - ?
+            WHERE user_id = ?
+            """, (PENALTY_FOR_3_LATE, message.from_id))
 
-😬 Завтра приходи раньше
+            penalty_text = f"\n💸 Штраф: -{PENALTY_FOR_3_LATE}₽"
+
+        text = f"""
+❌ {random.choice(LATE_MESSAGES)}
+
+🕒 Время: {current_time}
+🏆 Место сегодня: #{position}
+{penalty_text}
 """
-        )
 
-
-@bot.on.message(text="💰 Баланс")
-async def balance(message: Message):
-
-    user = message.from_id
-
-    sql.execute(
-        "SELECT money FROM users WHERE user_id = ?",
-        (user,)
-    )
-
-    money = sql.fetchone()[0]
-
-    await message.answer(
-        f"""
-💰 Твой баланс
-
-💵 {money}₽
-"""
-    )
-
-
-@bot.on.message(text="📊 Статистика")
-async def stats(message: Message):
-
-    user = message.from_id
-
-    sql.execute("""
-    SELECT arrivals, late, money
-    FROM users
-    WHERE user_id = ?
-    """, (user,))
-
-    data = sql.fetchone()
-
-    await message.answer(
-        f"""
-📊 Твоя статистика
-
-✅ Вовремя: {data[0]}
-🚨 Опозданий: {data[1]}
-💰 Баланс: {data[2]}₽
-"""
-    )
-
-
-@bot.on.message(text="🏆 Рейтинг")
-async def top(message: Message):
-
-    sql.execute("""
-    SELECT name, arrivals, money
-    FROM users
-    ORDER BY arrivals DESC
-    LIMIT 10
-    """)
-
-    users = sql.fetchall()
-
-    text = "🏆 ТОП СОТРУДНИКОВ\n\n"
-
-    place = 1
-
-    for user in users:
-        text += (
-            f"{place}. {user[0]}\n"
-            f"✅ {user[1]} | 💰 {user[2]}₽\n\n"
-        )
-        place += 1
+    db.commit()
 
     await message.answer(text)
 
+# =========================
+# БАЛАНС
+# =========================
 
-@bot.on.message(text="👑 Админ панель")
+@bot.on.message(text="💰 Баланс")
+async def balance(message: Message):
+    cursor.execute("""
+    SELECT balance, streak
+    FROM users
+    WHERE user_id = ?
+    """, (message.from_id,))
+
+    user = cursor.fetchone()
+
+    await message.answer(f"""
+💰 Баланс: {user[0]}₽
+🔥 Серия вовремя: {user[1]}
+""")
+
+# =========================
+# СТАТИСТИКА
+# =========================
+
+@bot.on.message(text="📊 Статистика")
+async def stats(message: Message):
+    cursor.execute("""
+    SELECT total_arrivals, on_time, late_count
+    FROM users
+    WHERE user_id = ?
+    """, (message.from_id,))
+
+    user = cursor.fetchone()
+
+    await message.answer(f"""
+📊 Твоя статистика
+
+✅ Вовремя: {user[1]}
+❌ Опозданий: {user[2]}
+📅 Всего приходов: {user[0]}
+""")
+
+# =========================
+# ТОП
+# =========================
+
+@bot.on.message(text="🏆 Топ")
+async def top(message: Message):
+    cursor.execute("""
+    SELECT name, on_time
+    FROM users
+    ORDER BY on_time DESC
+    LIMIT 10
+    """)
+
+    users = cursor.fetchall()
+
+    text = "🏆 ТОП СОТРУДНИКОВ\n\n"
+
+    medals = ["🥇", "🥈", "🥉"]
+
+    for i, user in enumerate(users):
+        medal = medals[i] if i < 3 else "👤"
+
+        text += f"{medal} {user[0]} — {user[1]} вовремя\n"
+
+    await message.answer(text)
+
+# =========================
+# АДМИНКА
+# =========================
+
+@bot.on.message(text="⚙ Админ-панель")
 async def admin_panel(message: Message):
-
     if message.from_id != ADMIN_ID:
         return
 
-    sql.execute("SELECT COUNT(*) FROM users")
-    total_users = sql.fetchone()[0]
+    cursor.execute("""
+    SELECT COUNT(*)
+    FROM users
+    """)
 
-    sql.execute("SELECT SUM(arrivals) FROM users")
-    total_arrivals = sql.fetchone()[0]
+    users = cursor.fetchone()[0]
 
-    sql.execute("SELECT SUM(late) FROM users")
-    total_late = sql.fetchone()[0]
+    cursor.execute("""
+    SELECT COUNT(*)
+    FROM arrivals
+    WHERE arrival_date = ?
+    """, (datetime.now().strftime("%Y-%m-%d"),))
 
-    if total_arrivals is None:
-        total_arrivals = 0
+    today = cursor.fetchone()[0]
 
-    if total_late is None:
-        total_late = 0
+    await message.answer(f"""
+⚙ АДМИН ПАНЕЛЬ
 
-    await message.answer(
-        f"""
-👑 АДМИН ПАНЕЛЬ
+👥 Сотрудников: {users}
+🟢 Сегодня отметились: {today}
+""")
 
-👥 Пользователей: {total_users}
-
-✅ Всего приходов: {total_arrivals}
-
-🚨 Всего опозданий: {total_late}
-
-🔥 Бот работает отлично
-"""
-    )
-
+# =========================
+# ЗАПУСК
+# =========================
 
 print("Бот запущен")
 
