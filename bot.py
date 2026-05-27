@@ -9,7 +9,7 @@ from vkbottle import Keyboard, Text
 # CONFIG
 # =====================
 
-TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w")  # положи токен в Railway ENV
+TOKEN = os.getenv("VK_TOKEN")
 ADMIN_ID = 47965177
 
 WORK_END = time(11, 42)
