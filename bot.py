@@ -18,7 +18,7 @@ BONUS_FOR_30 = 1000
 PENALTY_FOR_3_LATE = 1000
 
 # =====================================
-# ЗАПУСК БОТА
+# БОТ
 # =====================================
 
 bot = Bot(token=TOKEN)
@@ -111,14 +111,27 @@ def get_keyboard(admin=False):
     return keyboard.get_json()
 
 # =====================================
+# SAFE VK USER GET
+# =====================================
+
+async def get_user_name(user_id: int):
+    try:
+        users = await bot.api.users.get(user_ids=user_id)
+        if users:
+            return users[0].first_name
+    except Exception as e:
+        print("VK API error:", e)
+
+    return "Пользователь"
+
+# =====================================
 # СТАРТ
 # =====================================
 
 @bot.on.message(text=["Начать", "/start", "start"])
 async def start(message: Message):
 
-    user_info = await bot.api.users.get(message.from_id)
-    name = user_info[0].first_name
+    name = await get_user_name(message.from_id)
 
     cursor.execute("""
     INSERT OR IGNORE INTO users (user_id, name)
@@ -137,53 +150,31 @@ async def start(message: Message):
     )
 
 # =====================================
-# ПРИБЫЛ
+# ПРИБЫТИЕ
 # =====================================
 
 @bot.on.message(text="🟢 Я на месте")
 async def arrive(message: Message):
 
     now = datetime.now()
-
     today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M:%S")
-
-    # проверка был ли уже сегодня
 
     cursor.execute("""
     SELECT * FROM arrivals
     WHERE user_id = ? AND arrival_date = ?
     """, (message.from_id, today))
 
-    already = cursor.fetchone()
-
-    if already:
+    if cursor.fetchone():
         await message.answer("⚠ Ты уже отмечался сегодня.")
         return
 
-    # имя пользователя
-
-    user_info = await bot.api.users.get(message.from_id)
-    name = user_info[0].first_name
-
-    # запись прихода
+    name = await get_user_name(message.from_id)
 
     cursor.execute("""
-    INSERT INTO arrivals (
-        user_id,
-        name,
-        arrival_time,
-        arrival_date
-    )
+    INSERT INTO arrivals (user_id, name, arrival_time, arrival_date)
     VALUES (?, ?, ?, ?)
-    """, (
-        message.from_id,
-        name,
-        current_time,
-        today
-    ))
-
-    # место в рейтинге сегодня
+    """, (message.from_id, name, current_time, today))
 
     cursor.execute("""
     SELECT COUNT(*) FROM arrivals
@@ -199,39 +190,34 @@ async def arrive(message: Message):
         microsecond=0
     )
 
-    # вовремя
+    # =====================
+    # ВОВРЕМЯ
+    # =====================
 
     if now <= work_time:
 
         reward = 100
-
         if position == 1:
             reward += 50
 
         cursor.execute("""
         UPDATE users
-        SET
-            balance = balance + ?,
+        SET balance = balance + ?,
             total_arrivals = total_arrivals + 1,
             on_time = on_time + 1,
             streak = streak + 1
         WHERE user_id = ?
         """, (reward, message.from_id))
 
-        # бонус за 30 вовремя
-
         cursor.execute("""
-        SELECT on_time
-        FROM users
-        WHERE user_id = ?
+        SELECT on_time FROM users WHERE user_id = ?
         """, (message.from_id,))
 
         on_time = cursor.fetchone()[0]
 
         bonus_text = ""
 
-        if on_time % 30 == 0:
-
+        if on_time and on_time % 30 == 0:
             cursor.execute("""
             UPDATE users
             SET balance = balance + ?
@@ -249,33 +235,29 @@ async def arrive(message: Message):
 {bonus_text}
 """
 
-    # опоздание
+    # =====================
+    # ОПОЗДАНИЕ
+    # =====================
 
     else:
 
         cursor.execute("""
         UPDATE users
-        SET
-            total_arrivals = total_arrivals + 1,
+        SET total_arrivals = total_arrivals + 1,
             late_count = late_count + 1,
             streak = 0
         WHERE user_id = ?
         """, (message.from_id,))
 
         cursor.execute("""
-        SELECT late_count
-        FROM users
-        WHERE user_id = ?
+        SELECT late_count FROM users WHERE user_id = ?
         """, (message.from_id,))
 
         late_count = cursor.fetchone()[0]
 
         penalty_text = ""
 
-        # штраф за 3 опоздания
-
-        if late_count % 3 == 0:
-
+        if late_count and late_count % 3 == 0:
             cursor.execute("""
             UPDATE users
             SET balance = balance - ?
@@ -293,7 +275,6 @@ async def arrive(message: Message):
 """
 
     db.commit()
-
     await message.answer(text)
 
 # =====================================
@@ -304,12 +285,14 @@ async def arrive(message: Message):
 async def balance(message: Message):
 
     cursor.execute("""
-    SELECT balance, streak
-    FROM users
-    WHERE user_id = ?
+    SELECT balance, streak FROM users WHERE user_id = ?
     """, (message.from_id,))
 
     user = cursor.fetchone()
+
+    if not user:
+        await message.answer("Нет данных о тебе. Напиши /start")
+        return
 
     await message.answer(f"""
 💰 Баланс: {user[0]}₽
@@ -324,15 +307,15 @@ async def balance(message: Message):
 async def stats(message: Message):
 
     cursor.execute("""
-    SELECT
-        total_arrivals,
-        on_time,
-        late_count
-    FROM users
-    WHERE user_id = ?
+    SELECT total_arrivals, on_time, late_count
+    FROM users WHERE user_id = ?
     """, (message.from_id,))
 
     user = cursor.fetchone()
+
+    if not user:
+        await message.answer("Нет данных о тебе. Напиши /start")
+        return
 
     await message.answer(f"""
 📊 Твоя статистика
@@ -359,13 +342,10 @@ async def top(message: Message):
     users = cursor.fetchall()
 
     text = "🏆 ТОП СОТРУДНИКОВ\n\n"
-
     medals = ["🥇", "🥈", "🥉"]
 
     for i, user in enumerate(users):
-
         medal = medals[i] if i < 3 else "👤"
-
         text += f"{medal} {user[0]} — {user[1]} вовремя\n"
 
     await message.answer(text)
@@ -380,16 +360,11 @@ async def admin_panel(message: Message):
     if message.from_id != ADMIN_ID:
         return
 
-    cursor.execute("""
-    SELECT COUNT(*)
-    FROM users
-    """)
-
+    cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
 
     cursor.execute("""
-    SELECT COUNT(*)
-    FROM arrivals
+    SELECT COUNT(*) FROM arrivals
     WHERE arrival_date = ?
     """, (datetime.now().strftime("%Y-%m-%d"),))
 
@@ -407,5 +382,4 @@ async def admin_panel(message: Message):
 # =====================================
 
 print("Бот запущен")
-
 bot.run_forever()
