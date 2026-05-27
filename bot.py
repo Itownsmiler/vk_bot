@@ -4,7 +4,7 @@ from datetime import datetime
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-TOKEN = "vk1.a.OFDPQ1QYZWxCvwnKRFRzx864rlmEocxelK5uYUU5YcWvgfxOZn4UW0tUs-dCyaEWG6PtS-9cc3KYg0gMEBOajlCoqB9EhKjz1s4fDlyfM6Zq2-OHzlRGrB8PUR3jtVIhoJOFvk5YRasfij3uWDNqSBQn9IHFR7d5Ec2Sc30UD-lC_YlEvEVD2ke4EtYhYXFijJuBMCIHHoavhcFgetrMXQ"
+TOKEN = "vk1.a.wzeSitSagSCPDO4ll1fIbYXy-AfL1Vnvg85dUxqnwtMUmBXu91NFBL7faT4v7JZb83tXIKCCtxXgDs_fbrXKh8teikpJG0sTHSYXZW1M7zWCcHvBOLZDuSAmDKo2EjHOZTCNMnrqrUBhpFLNsXkEUvjmOLa5OI09vYDigzJmo-cS4TEYem5x6dTTEj8h7p3_LN2WY-vN_dte7ikft86O_w"
 ADMIN_ID = 47965177
 
 bot = Bot(token=TOKEN)
