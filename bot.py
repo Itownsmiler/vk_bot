@@ -57,7 +57,10 @@ def keyboard():
 
 
 def safe_payload(message):
-    payload = message.payload
+    payload = getattr(message, "payload", None)
+
+    if not payload:
+        return {}
 
     if isinstance(payload, dict):
         return payload
@@ -126,8 +129,16 @@ async def router(message: Message):
 
     if cmd == "arrive":
         await arrive(message)
-    elif cmd == "stats":
+        return
+
+    if cmd == "stats":
         await stats(message)
+        return
+
+    await message.answer(
+        "👋 Используй кнопки ниже",
+        keyboard=keyboard()
+    )
 
 
 async def arrive(message: Message):
@@ -137,6 +148,7 @@ async def arrive(message: Message):
 
     today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M:%S")
+    current_month = now.strftime("%Y-%m")
 
     cursor.execute("""
         SELECT 1 FROM arrivals
@@ -146,22 +158,19 @@ async def arrive(message: Message):
     if cursor.fetchone():
         return await message.answer("⚠ Уже отмечался сегодня", keyboard=keyboard())
 
-    name = await get_name(message.from_id)
-    current_month = now.strftime("%Y-%m")
-
-    cursor.execute("""
-        INSERT INTO users (user_id, name, last_reset_month)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (user_id)
-        DO UPDATE SET name = EXCLUDED.name
-    """, (message.from_id, name, current_month))
-
     late = now.time() >= WORK_END
 
     cursor.execute("""
         INSERT INTO arrivals (user_id, arrival_date, arrival_time, late)
         VALUES (%s, %s, %s, %s)
     """, (message.from_id, today, current_time, late))
+
+    cursor.execute("""
+        INSERT INTO users (user_id, name, last_reset_month)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id)
+        DO UPDATE SET name = EXCLUDED.name
+    """, (message.from_id, await get_name(message.from_id), current_month))
 
     if late:
         cursor.execute("""
