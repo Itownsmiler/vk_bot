@@ -114,10 +114,9 @@ if row[0] != current_month:
 
 @bot.on.message(text=["/start", "start", "Начать"])
 async def start(message: Message):
-
-```
 check_month_reset()
 
+```
 name = await get_name(message.from_id)
 
 current_month = datetime.now(
@@ -132,8 +131,7 @@ cursor.execute("""
     )
     VALUES (%s, %s, %s)
     ON CONFLICT (user_id)
-    DO UPDATE SET
-        name = EXCLUDED.name
+    DO UPDATE SET name = EXCLUDED.name
 """, (
     message.from_id,
     name,
@@ -150,10 +148,9 @@ await message.answer(
 
 @bot.on.message()
 async def router(message: Message):
-
-```
 payload = safe_payload(message)
 
+```
 cmd = payload.get("cmd")
 
 if cmd == "arrive":
@@ -164,10 +161,9 @@ elif cmd == "stats":
 ```
 
 async def arrive(message: Message):
-
-```
 check_month_reset()
 
+```
 now = datetime.now(ZoneInfo("Europe/Moscow"))
 
 today = now.strftime("%Y-%m-%d")
@@ -176,8 +172,8 @@ current_time = now.strftime("%H:%M:%S")
 cursor.execute("""
     SELECT 1
     FROM arrivals
-    WHERE user_id=%s
-    AND arrival_date=%s
+    WHERE user_id = %s
+    AND arrival_date = %s
 """, (
     message.from_id,
     today
@@ -201,8 +197,7 @@ cursor.execute("""
     )
     VALUES (%s, %s, %s)
     ON CONFLICT (user_id)
-    DO UPDATE SET
-        name = EXCLUDED.name
+    DO UPDATE SET name = EXCLUDED.name
 """, (
     message.from_id,
     name,
@@ -230,14 +225,13 @@ if late:
     cursor.execute("""
         UPDATE users
         SET late_count = late_count + 1
-        WHERE user_id=%s
+        WHERE user_id = %s
     """, (message.from_id,))
 
     text = (
         f"❌ Опоздание\n"
         f"🕒 Время: {current_time}"
     )
-
 else:
     text = (
         f"✅ Отметка принята\n"
@@ -253,14 +247,11 @@ await message.answer(
 ```
 
 async def stats(message: Message):
-
-```
 check_month_reset()
 
+```
 cursor.execute("""
-    SELECT
-        name,
-        late_count
+    SELECT name, late_count
     FROM users
     ORDER BY late_count DESC, name ASC
 """)
@@ -286,3 +277,4 @@ await message.answer(
 
 print("BOT STARTED")
 bot.run_forever()
+
