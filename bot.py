@@ -3,20 +3,22 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 import psycopg2
-
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
+
 
 TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg9GeLa1uIeVYLO3p0PcapFjI_h0TeXSzVi8mBrJiDZkHCl50Ai4oKX3hyu3IFVoYvQgF4qZYsM_2yI4JjcaGDuSly1RceyiNDxbrS89LuUwFSSWxVoXtmLFEgAPBxlV_nWMtv2T8VkfUfEN73wAD0w"
 
 DATABASE_URL = "postgresql://postgres:tBqXRFHAxgeaPsIpshqiXoEhKNOcxBAz@zephyr.proxy.rlwy.net:39924/railway"
 
-WORK_END = time(11, 42)
-
 bot = Bot(TOKEN)
 
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
+
+WORK_START = time(10, 0)
+WORK_END = time(11, 41)
+
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
@@ -57,17 +59,14 @@ def keyboard():
 
 
 def safe_payload(message):
-    payload = getattr(message, "payload", None)
+    p = getattr(message, "payload", None)
 
-    if not payload:
-        return {}
+    if isinstance(p, dict):
+        return p
 
-    if isinstance(payload, dict):
-        return payload
-
-    if isinstance(payload, str):
+    if isinstance(p, str):
         try:
-            return json.loads(payload)
+            return json.loads(p)
         except:
             return {}
 
@@ -77,11 +76,9 @@ def safe_payload(message):
 async def get_name(user_id):
     try:
         user = await bot.api.users.get(user_ids=user_id)
-        if user:
-            return user[0].first_name
+        return user[0].first_name
     except:
-        pass
-    return "Пользователь"
+        return "Пользователь"
 
 
 def check_month_reset():
@@ -116,10 +113,7 @@ async def start(message: Message):
 
     conn.commit()
 
-    await message.answer(
-        f"Привет, {name} 👋",
-        keyboard=keyboard()
-    )
+    await message.answer(f"Привет, {name} 👋", keyboard=keyboard())
 
 
 @bot.on.message()
@@ -135,10 +129,7 @@ async def router(message: Message):
         await stats(message)
         return
 
-    await message.answer(
-        "👋 Используй кнопки ниже",
-        keyboard=keyboard()
-    )
+    await message.answer("Используй кнопки ниже", keyboard=keyboard())
 
 
 async def arrive(message: Message):
@@ -158,33 +149,32 @@ async def arrive(message: Message):
     if cursor.fetchone():
         return await message.answer("⚠ Уже отмечался сегодня", keyboard=keyboard())
 
-current_time = now.time()
+    current_t = now.time()
 
-start_ok = time(10, 0)
-end_ok = time(11, 41)
+    late = not (WORK_START <= current_t <= WORK_END)
 
-late = not (start_ok <= current_time <= end_ok)
+    cursor.execute("""
+        INSERT INTO arrivals (user_id, arrival_date, arrival_time, late)
+        VALUES (%s, %s, %s, %s)
+    """, (message.from_id, today, current_time, late))
 
-cursor.execute("""
-    INSERT INTO arrivals (user_id, arrival_date, arrival_time, late)
-    VALUES (%s, %s, %s, %s)
-""", (message.from_id, today, current_time, late))
+    cursor.execute("""
+        INSERT INTO users (user_id, name, last_reset_month)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id)
+        DO UPDATE SET name = EXCLUDED.name
+    """, (message.from_id, await get_name(message.from_id), current_month))
 
-cursor.execute("""
-    INSERT INTO users (user_id, name, last_reset_month)
-    VALUES (%s, %s, %s)
-    ON CONFLICT (user_id)
-    DO UPDATE SET name = EXCLUDED.name
-""", (message.from_id, await get_name(message.from_id), current_month))
     if late:
         cursor.execute("""
             UPDATE users
             SET late_count = late_count + 1
             WHERE user_id=%s
         """, (message.from_id,))
-        text = f"❌ Опоздание\n🕒 {current_time}"
+
+        text = f"❌ ОПАЗДАНИЕ\n🕒 {current_time}"
     else:
-        text = f"✅ Вовремя\n🕒 {current_time}"
+        text = f"✅ ВОВРЕМЯ\n🕒 {current_time}"
 
     conn.commit()
 
