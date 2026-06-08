@@ -44,7 +44,7 @@ def keyboard():
     kb = Keyboard(one_time=False)
 
     kb.add(
-        Text("🟢 Отметиться", payload={"cmd": "arrive"}),
+        Text("🟢 Я на месте", payload={"cmd": "arrive"}),
         KeyboardButtonColor.POSITIVE
     ).row()
 
