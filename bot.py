@@ -1,4 +1,3 @@
-```python
 import json
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -259,4 +258,3 @@ async def stats(message: Message):
 
 print("BOT STARTED")
 bot.run_forever()
-```
