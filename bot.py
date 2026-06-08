@@ -158,7 +158,12 @@ async def arrive(message: Message):
     if cursor.fetchone():
         return await message.answer("⚠ Уже отмечался сегодня", keyboard=keyboard())
 
-    late = now.time() >= WORK_END
+    current_time = now.time()
+
+start_ok = time(10, 0)
+end_ok = time(11, 41)
+
+late = not (start_ok <= current_time <= end_ok)
 
     cursor.execute("""
         INSERT INTO arrivals (user_id, arrival_date, arrival_time, late)
