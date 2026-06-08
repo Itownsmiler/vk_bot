@@ -158,25 +158,24 @@ async def arrive(message: Message):
     if cursor.fetchone():
         return await message.answer("⚠ Уже отмечался сегодня", keyboard=keyboard())
 
-    current_time = now.time()
+current_time = now.time()
 
 start_ok = time(10, 0)
 end_ok = time(11, 41)
 
 late = not (start_ok <= current_time <= end_ok)
 
-    cursor.execute("""
-        INSERT INTO arrivals (user_id, arrival_date, arrival_time, late)
-        VALUES (%s, %s, %s, %s)
-    """, (message.from_id, today, current_time, late))
+cursor.execute("""
+    INSERT INTO arrivals (user_id, arrival_date, arrival_time, late)
+    VALUES (%s, %s, %s, %s)
+""", (message.from_id, today, current_time, late))
 
-    cursor.execute("""
-        INSERT INTO users (user_id, name, last_reset_month)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (user_id)
-        DO UPDATE SET name = EXCLUDED.name
-    """, (message.from_id, await get_name(message.from_id), current_month))
-
+cursor.execute("""
+    INSERT INTO users (user_id, name, last_reset_month)
+    VALUES (%s, %s, %s)
+    ON CONFLICT (user_id)
+    DO UPDATE SET name = EXCLUDED.name
+""", (message.from_id, await get_name(message.from_id), current_month))
     if late:
         cursor.execute("""
             UPDATE users
