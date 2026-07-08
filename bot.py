@@ -8,8 +8,8 @@ from psycopg2 import OperationalError, InterfaceError
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-TOKEN = "PASTE_TOKEN"
-DATABASE_URL = "PASTE_DATABASE_URL"
+TOKEN = "vk1.a.FlawJLr5MlrkGA6EOyeVXwfx7qFiAhKYCLjbxdhbHe_udi91ofdgERFpIIRG9oFcg..."
+DATABASE_URL = "postgresql://postgres:tBqXRFHAxgeaPsIpshqiXoEhKNOcxBAz@zephyr.proxy.rlwy.net:39924/railway"
 
 bot = Bot(TOKEN)
 
